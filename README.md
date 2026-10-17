@@ -161,8 +161,6 @@ CFO/
 │   └── func_ind_seq_proc.sql
 ├── db.php
 ├── ECprojectCaseStudy.md
-├── vision.MD
-├── repomix-output.xml
 └── README.md
 ```
 
@@ -381,11 +379,9 @@ Useful next steps:
 
 ## Project Documentation
 
-Additional context lives in:
+Case study requirements and specifications live in:
 
-- `ECprojectCaseStudy.md` - original project brief and requirements.
-- `vision.MD` - implementation roadmap and development notes.
-- `repomix-output.xml` - generated merged representation of the repository for analysis.
+- `ECprojectCaseStudy.md` - original project brief, business constraints, and requirements.
 
 ## Summary
 
