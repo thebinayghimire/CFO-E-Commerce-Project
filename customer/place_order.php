@@ -114,6 +114,39 @@ function execute_or_fail($conn, $stmt, string $message): void
     }
 }
 
+function next_table_sequence_id($conn, string $sequence_name, string $table_name, string $column_name, string $message): string
+{
+    $allowed_sequences = [
+        'ORDER_SEQ|ORDERS|ORDER_ID' => true,
+        'PAYMENT_SEQ|PAYMENT|PAYMENT_ID' => true,
+    ];
+    $key = $sequence_name . '|' . $table_name . '|' . $column_name;
+
+    if (empty($allowed_sequences[$key])) {
+        redirect_order_failure($conn, $message);
+    }
+
+    $stmt = oci_parse($conn, "SELECT NVL(MAX({$column_name}), 0) AS MAX_ID FROM {$table_name}");
+    execute_or_fail($conn, $stmt, $message);
+    $row = oci_fetch_assoc($stmt);
+    oci_free_statement($stmt);
+    $max_id = (int)($row['MAX_ID'] ?? 0);
+
+    for ($attempt = 0; $attempt < 1000; $attempt++) {
+        $stmt = oci_parse($conn, "SELECT {$sequence_name}.NEXTVAL AS NEXT_ID FROM DUAL");
+        execute_or_fail($conn, $stmt, $message);
+        $row = oci_fetch_assoc($stmt);
+        oci_free_statement($stmt);
+
+        $next_id = (int)($row['NEXT_ID'] ?? 0);
+        if ($next_id > $max_id) {
+            return (string)$next_id;
+        }
+    }
+
+    redirect_order_failure($conn, $message);
+}
+
 // Lock the chosen slot so trigger capacity checks cannot race another checkout.
 $allowed_slot_rules_sql = collection_slot_allowed_sql('cs');
 $stmt = oci_parse($conn, "SELECT SLOT_ID
@@ -260,22 +293,18 @@ if (!$is_paypal_return) {
     }
 }
 
-// Create the order and return its generated id from Oracle.
-$order_id = null;
+// Seed scripts can leave ORDER_SEQ behind existing orders, so advance it past the table max first.
+$order_id = next_table_sequence_id($conn, 'ORDER_SEQ', 'ORDERS', 'ORDER_ID', 'Could not create your order.');
 $stmt = oci_parse($conn, "INSERT INTO ORDERS (ORDER_ID, CUSTOMER_ID, SLOT_ID, TOTAL_AMOUNT, ORDER_DATE, STATUS)
-                          VALUES (ORDER_SEQ.NEXTVAL, :p_uid, :p_sid, :p_total, SYSDATE, :p_order_status)
-                          RETURNING ORDER_ID INTO :p_oid");
+                          VALUES (:p_oid, :p_uid, :p_sid, :p_total, SYSDATE, :p_order_status)");
+oci_bind_by_name($stmt, ':p_oid', $order_id);
 oci_bind_by_name($stmt, ':p_uid', $user_id);
 oci_bind_by_name($stmt, ':p_sid', $slot_id);
 oci_bind_by_name($stmt, ':p_total', $total_amount);
 oci_bind_by_name($stmt, ':p_order_status', $order_status);
-oci_bind_by_name($stmt, ':p_oid', $order_id, 40);
 execute_or_fail($conn, $stmt, 'Could not create your order.');
 oci_free_statement($stmt);
 
-if (!$order_id) {
-    redirect_order_failure($conn, 'Could not create your order.');
-}
 $order_id = (string)(int)$order_id;
 
 // ORDER_ITEM has no sequence in the supplied schema, so lock the table while assigning ids.
@@ -306,9 +335,11 @@ foreach ($cart_items as $item) {
     oci_free_statement($stmt);
 }
 
+$payment_id = next_table_sequence_id($conn, 'PAYMENT_SEQ', 'PAYMENT', 'PAYMENT_ID', 'Could not record payment for your order.');
 if ($method_id !== null) {
     $stmt = oci_parse($conn, "INSERT INTO PAYMENT (PAYMENT_ID, AMOUNT, PAYMENT_STATUS, ORDER_ID, METHOD_ID, USER_ID)
-                              VALUES (PAYMENT_SEQ.NEXTVAL, :p_amount, :p_status, :p_oid, :p_mid, :p_uid)");
+                              VALUES (:p_payment_id, :p_amount, :p_status, :p_oid, :p_mid, :p_uid)");
+    oci_bind_by_name($stmt, ':p_payment_id', $payment_id);
     oci_bind_by_name($stmt, ':p_amount', $total_amount);
     oci_bind_by_name($stmt, ':p_status', $payment_status);
     oci_bind_by_name($stmt, ':p_oid', $order_id);
@@ -316,7 +347,8 @@ if ($method_id !== null) {
     oci_bind_by_name($stmt, ':p_uid', $user_id);
 } else {
     $stmt = oci_parse($conn, "INSERT INTO PAYMENT (PAYMENT_ID, AMOUNT, PAYMENT_STATUS, ORDER_ID, USER_ID)
-                              VALUES (PAYMENT_SEQ.NEXTVAL, :p_amount, :p_status, :p_oid, :p_uid)");
+                              VALUES (:p_payment_id, :p_amount, :p_status, :p_oid, :p_uid)");
+    oci_bind_by_name($stmt, ':p_payment_id', $payment_id);
     oci_bind_by_name($stmt, ':p_amount', $total_amount);
     oci_bind_by_name($stmt, ':p_status', $payment_status);
     oci_bind_by_name($stmt, ':p_oid', $order_id);

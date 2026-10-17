@@ -152,7 +152,7 @@ unset($_SESSION['paypal_paid'], $_SESSION['paypal_txn_id']);
 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $base_path = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
 $base_url = $scheme . '://' . $_SERVER['HTTP_HOST'] . $base_path;
-$return_url = $base_url . '/place_order.php?paypal=success&token=' . urlencode($token);
+$return_url = $base_url . '/paypal_success.php?token=' . urlencode($token);
 $cancel_url = $base_url . '/paypal_cancel.php?token=' . urlencode($token);
 $invoice_ref = 'CFO-' . (int)$user_id . '-' . time();
 

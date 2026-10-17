@@ -53,30 +53,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         oci_free_statement($stmt);
     }
 
+    // ── INSERT SYSTEM_USER (trigger assigns USER_ID via sequence) ─────────────
     if (empty($errors)) {
-        $stmt = oci_parse($conn, 'SELECT seq_system_user.NEXTVAL AS N FROM dual');
-        if (!oci_execute($stmt, OCI_NO_AUTO_COMMIT)) {
-            $err = oci_error($stmt);
-            oci_rollback($conn);
-            $errors[] = 'Could not prepare your account: ' . ($err['message'] ?? 'unknown error');
-        } else {
-            $row = oci_fetch_assoc($stmt);
-            $new_user_id = (int)$row['N'];
-        }
-        oci_free_statement($stmt);
-    }
-
-    if (empty($errors)) {
+        $new_user_id = null;
         $stmt = oci_parse($conn, "
-            INSERT INTO SYSTEM_USER (USER_ID, NAME, EMAIL, PASSWORD, PHONE_NO, ADDRESS, STATUS, CREATED_AT)
-            VALUES (:u, :n, :e, :p, :ph, :a, 'Active', SYSDATE)
+            INSERT INTO SYSTEM_USER (NAME, EMAIL, PASSWORD, PHONE_NO, ADDRESS, STATUS, CREATED_AT)
+            VALUES (:n, :e, :p, :ph, :a, 'Active', SYSDATE)
+            RETURNING USER_ID INTO :u
         ");
-        oci_bind_by_name($stmt, ':u', $new_user_id);
-        oci_bind_by_name($stmt, ':n', $pending['name']);
-        oci_bind_by_name($stmt, ':e', $pending['email']);
-        oci_bind_by_name($stmt, ':p', $pending['password_hash']);
+        oci_bind_by_name($stmt, ':n',  $pending['name']);
+        oci_bind_by_name($stmt, ':e',  $pending['email']);
+        oci_bind_by_name($stmt, ':p',  $pending['password_hash']);
         oci_bind_by_name($stmt, ':ph', $pending['phone']);
-        oci_bind_by_name($stmt, ':a', $pending['address']);
+        oci_bind_by_name($stmt, ':a',  $pending['address']);
+        oci_bind_by_name($stmt, ':u',  $new_user_id, 20);
 
         if (!oci_execute($stmt, OCI_NO_AUTO_COMMIT)) {
             $err = oci_error($stmt);
@@ -86,6 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         oci_free_statement($stmt);
     }
 
+    // ── INSERT CUSTOMER using the returned USER_ID ────────────────────────────
     if (empty($errors)) {
         $stmt = oci_parse($conn, 'INSERT INTO CUSTOMER (USER_ID, LOYALTY_POINTS) VALUES (:u, 0)');
         oci_bind_by_name($stmt, ':u', $new_user_id);
